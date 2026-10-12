@@ -5,7 +5,7 @@
   const LEVELS = window.LEVELS;
   const GAME_KEY = 'controversy.game.v1';
   const SETUP_KEY = 'controversy.setup.v1';
-  const MIN_PLAYERS = 4, MAX_PLAYERS = 8, MAX_ROUNDS = 5;
+  const MIN_PLAYERS = 2, MAX_PLAYERS = 8, MAX_ROUNDS = 5;
   const CONVINCE_SECONDS = 60;
   const FLAME_SCALE = [0.55, 0.7, 0.85, 1];
 
@@ -23,7 +23,13 @@
   const level = id => LEVELS.find(l => l.id === id);
   const vote = v => v ? 'Agree' : 'Disagree';
 
-  let setup = load(SETUP_KEY, { players: ['', '', '', ''], levels: [1, 2, 3, 4], rounds: 3 });
+  let setup = load(SETUP_KEY, { players: [], levels: [1, 2, 3, 4], rounds: 3 });
+  // The first MIN_PLAYERS rows always exist; extra rows exist only while they hold a name.
+  const tidyPlayers = () => {
+    setup.players = setup.players.filter((n, i) => i < MIN_PLAYERS || n.trim());
+    while (setup.players.length < MIN_PLAYERS) setup.players.push('');
+  };
+  tidyPlayers();
   let G = load(GAME_KEY, null);
   let screen = 'home';
   let timerId = null;
@@ -53,9 +59,8 @@
   };
 
   function setupProblem() {
-    const names = setup.players.map(s => s.trim()), filled = names.filter(Boolean);
-    if (names.length < MIN_PLAYERS) return `You need at least ${MIN_PLAYERS} players.`;
-    if (filled.length !== names.length) return 'Give every player a name.';
+    const names = setup.players.map(s => s.trim()).filter((n, i) => i < MIN_PLAYERS || n), filled = names.filter(Boolean);
+    if (filled.length !== names.length) return `Enter at least ${MIN_PLAYERS} player names.`;
     if (new Set(filled.map(s => s.toLowerCase())).size !== filled.length) return 'Every player needs a different name.';
     return '';
   }
@@ -63,6 +68,7 @@
   function persist() { if (G) save(GAME_KEY, G); }
 
   function startGame() {
+    tidyPlayers();
     const names = setup.players.map(s => s.trim());
     G = {
       players: names.map(name => ({ name, score: 0 })),
@@ -136,6 +142,14 @@
       <button class="icon-btn" data-a="quit" aria-label="Quit game">✕</button>
     </header>`;
 
+  // A greyed-out "ghost" row at the end turns into a real player as soon as someone types in it.
+  const playerRow = (i, name, ghost = false) => `
+    <li class="${ghost ? 'ghost' : ''}"><span class="seat">${i + 1}</span>
+      <input data-i="${i}" value="${esc(name)}" maxlength="16" placeholder="${ghost ? 'Add player' : `Player ${i + 1}`}" autocomplete="off" enterkeyhint="next" aria-label="Player ${i + 1} name">
+      ${!ghost && i >= MIN_PLAYERS ? removeBtn(i) : ''}
+    </li>`;
+  const removeBtn = i => `<button class="icon-btn" data-a="rmPlayer" data-i="${i}" aria-label="Remove player">✕</button>`;
+
   const miniCard = () =>
     `<div class="mini-card lv${G.card.lv}"><span class="lvl">${esc(level(G.card.lv).name)}</span>${esc(G.card.text)}</div>`;
 
@@ -152,7 +166,7 @@
           <button class="btn ghost" data-a="rules">How to play</button>
         </div>
         <ul class="facts">
-          <li><b>4–8</b>players</li><li><b>30–60</b>minutes</li><li><b>14+</b>ages</li>
+          <li><b>2–8</b>players</li><li><b>30–60</b>minutes</li><li><b>14+</b>ages</li>
         </ul>
         <footer class="foot">
           created by <strong>Roast Beef Games</strong><br>
@@ -192,13 +206,9 @@
         <button class="back" data-a="home">‹ Back</button>
         <h2>Players</h2>
         <p class="small">Enter players in seating order, <b>youngest first</b>. The Hot Seat moves to the left.</p>
-        <ul class="players">${setup.players.map((p, i) => `
-          <li><span class="seat">${i + 1}</span>
-            <input data-i="${i}" value="${esc(p)}" maxlength="16" placeholder="Player ${i + 1}" autocomplete="off" enterkeyhint="next">
-            ${setup.players.length > MIN_PLAYERS ? `<button class="icon-btn" data-a="rmPlayer" data-i="${i}" aria-label="Remove player">✕</button>` : ''}
-          </li>`).join('')}
+        <ul class="players">${setup.players.map((p, i) => playerRow(i, p)).join('')}${
+          setup.players.length < MAX_PLAYERS ? playerRow(setup.players.length, '', true) : ''}
         </ul>
-        ${setup.players.length < MAX_PLAYERS ? `<button class="btn ghost small" data-a="addPlayer">+ Add player</button>` : ''}
         <h2>Heat levels</h2>
         <div class="levels">${LEVELS.map(l => `
           <button class="lvl-chip lv${l.id} ${setup.levels.includes(l.id) ? 'on' : ''}" data-a="toggleLevel" data-lv="${l.id}" aria-pressed="${setup.levels.includes(l.id)}">
@@ -380,8 +390,7 @@
     setup: () => { screen = 'setup'; },
     resume: () => { screen = 'game'; requestWakeLock(); },
     start: () => { save(SETUP_KEY, setup); startGame(); screen = 'game'; },
-    addPlayer: () => { setup.players.push(''); focusLast = true; },
-    rmPlayer: d => { setup.players.splice(+d.i, 1); },
+    rmPlayer: d => { setup.players.splice(+d.i, 1); save(SETUP_KEY, setup); },
     toggleLevel: d => {
       const lv = +d.lv, on = setup.levels.includes(lv);
       if (on && setup.levels.length === 1) return;
@@ -424,7 +433,7 @@
     endHome: () => { G = null; drop(GAME_KEY); screen = 'home'; },
   };
 
-  let focusLast = false;
+  let focusIdx = null;
   let lastKey = '';
 
   // ---------- render loop ----------
@@ -440,10 +449,9 @@
     $app.innerHTML = views[name]();
     persist();
     if (name === 'reveal' && G.rvStage === 'convince') runTimer();
-    if (focusLast) {
-      focusLast = false;
-      const ins = $app.querySelectorAll('.players input');
-      ins[ins.length - 1]?.focus();
+    if (focusIdx != null) {
+      $app.querySelector(`.players input[data-i="${focusIdx}"]`)?.focus();
+      focusIdx = null;
     }
   }
 
@@ -499,12 +507,33 @@
   // Typing names updates state without re-rendering (keeps keyboard focus).
   $app.addEventListener('input', e => {
     if (e.target.matches('.players input')) {
-      setup.players[+e.target.dataset.i] = e.target.value;
+      const li = e.target.closest('li');
+      if (li.classList.contains('ghost')) {
+        // First keystroke in the ghost row: it becomes a real player and a new ghost appears below it.
+        li.classList.remove('ghost');
+        e.target.placeholder = `Player ${setup.players.length + 1}`;
+        setup.players.push(e.target.value);
+        li.insertAdjacentHTML('beforeend', removeBtn(setup.players.length - 1));
+        if (setup.players.length < MAX_PLAYERS) li.insertAdjacentHTML('afterend', playerRow(setup.players.length, '', true));
+      } else {
+        setup.players[+e.target.dataset.i] = e.target.value;
+      }
       save(SETUP_KEY, setup);
       const why = setupProblem();
       $app.querySelector('[data-a="start"]').disabled = !!why;
       $app.querySelector('#why').textContent = why;
     }
+  });
+  // Leaving an extra row empty removes it (and the ghost row moves up).
+  $app.addEventListener('focusout', e => {
+    if (!e.target.matches('.players input')) return;
+    const i = +e.target.dataset.i;
+    if (i < MIN_PLAYERS || i >= setup.players.length || setup.players[i].trim()) return;
+    const next = e.relatedTarget?.matches?.('.players input') ? +e.relatedTarget.dataset.i : null;
+    setup.players.splice(i, 1);
+    save(SETUP_KEY, setup);
+    focusIdx = next == null ? null : next > i ? next - 1 : next;
+    render();
   });
   $app.addEventListener('keydown', e => {
     if (e.key === 'Enter' && e.target.matches('.players input')) {

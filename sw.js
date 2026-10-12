@@ -1,5 +1,5 @@
 // Offline support: app shell is cached up front, fonts are cached on first use.
-const CACHE = 'controversy-v2';
+const CACHE = 'controversy-v3';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'js/app.js', 'js/cards.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
