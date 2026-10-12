@@ -1,6 +1,8 @@
 # Controversy — the app
 
 Pass-and-play **Hot Seat** mode of Controversy (controversygame.com) for one phone, 4–8 players.
+**Play it:** https://jordana25.github.io/controversy/
+
 It's an installable web app (PWA): no build step, works offline once loaded, and goes on the home screen like a native app.
 
 ## Run it locally
